@@ -117,7 +117,9 @@ class Renderer(QGraphicsView):
     def highlight_cell(self, cell):
         for item in self.scene.items():
             if isinstance(item, CellItem) and item.cell == cell:
-                item.setPen(QPen(Qt.red, 2))
+                pen = QPen(Qt.red, 3) # Changed the thickness to 3
+                pen.setStyle(Qt.DashLine) # Added a dash line style for more visibility
+                item.setPen(pen)
                 break
 
     def mousePressEvent(self, event):

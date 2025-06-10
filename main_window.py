@@ -52,10 +52,12 @@ class MainWindow(QMainWindow):
         # Zoom buttons
         self.zoom_in_button = QPushButton("Zoom In")
         self.zoom_in_button.clicked.connect(self.zoom_in)
+        self.zoom_in_button.setToolTip("Zoom in on the simulation")
         self.top_left_control_layout.addWidget(self.zoom_in_button)
 
         self.zoom_out_button = QPushButton("Zoom Out")
         self.zoom_out_button.clicked.connect(self.zoom_out)
+        self.zoom_out_button.setToolTip("Zoom out of the simulation")
         self.top_left_control_layout.addWidget(self.zoom_out_button)
 
         self.main_control_layout = QHBoxLayout()
@@ -64,23 +66,28 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton("Start")
         self.start_button.clicked.connect(self.toggle_simulation)
         self.start_button.setStyleSheet("background-color: green")
+        self.start_button.setToolTip("Start or stop the simulation")
         self.main_control_layout.addWidget(self.start_button)
 
         self.add_cell_button = QPushButton("Add Cell")
         self.add_cell_button.clicked.connect(lambda: self.add_random_cell("cell"))
+        self.add_cell_button.setToolTip("Add a new random cell")
         self.main_control_layout.addWidget(self.add_cell_button)
 
         self.add_bacteria_button = QPushButton("Add Bacteria")
         self.add_bacteria_button.clicked.connect(lambda: self.add_random_cell("bacteria"))
+        self.add_bacteria_button.setToolTip("Add a new random bacterium")
         self.main_control_layout.addWidget(self.add_bacteria_button)
 
         self.delete_cell_button = QPushButton("Delete Selected")
         self.delete_cell_button.clicked.connect(self.delete_selected_cell)
         self.delete_cell_button.setEnabled(False)
+        self.delete_cell_button.setToolTip("Delete the currently selected cell")
         self.main_control_layout.addWidget(self.delete_cell_button)
 
         self.random_button = QPushButton("Random")
         self.random_button.clicked.connect(self.populate_random)
+        self.random_button.setToolTip("Add a random population of cells and food")
         self.main_control_layout.addWidget(self.random_button)
 
         self.right_panel_layout = QVBoxLayout()

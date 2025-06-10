@@ -1,6 +1,6 @@
 import random
 import math
-from cell import Cell, Genome
+from cell import Cell, Genome, PredatorCell, PhotosyntheticCell, DefensiveCell, ReproductiveCell
 
 class Environment:
     def __init__(self, radius):
@@ -12,6 +12,8 @@ class Environment:
         self.max_food = 1000
         self.current_time = 0  # Track the current time
         self.starvation_threshold = 1000  # Default value 1000
+        self.wrap_around = False  # New attribute to control wrapping behavior
+        self.light_source = (radius, radius)  # Center of the environment as a light source
 
     def add_cell(self, cell):
         self.cells.append(cell)
@@ -21,6 +23,22 @@ class Environment:
             self.cells.remove(cell)
         else:
             print(f"Attempted to remove a cell that is not in the list: {cell}")
+
+    def resolve_boundary_collision(self, cell):
+        if self.wrap_around:
+            # Wrap around the edges
+            cell.position = (
+                (cell.position[0] - self.center[0] + self.radius) % (2 * self.radius) + self.center[0],
+                (cell.position[1] - self.center[1] + self.radius) % (2 * self.radius) + self.center[1]
+            )
+        else:
+            # Default behavior: bounce back from the boundary
+            distance = math.sqrt((cell.position[0] - self.center[0]) ** 2 + (cell.position[1] - self.center[1]) ** 2)
+            if distance > self.radius - cell.genome.genes['size'] / 2:
+                angle = math.atan2(self.center[1] - cell.position[1], self.center[0] - cell.position[0])
+                new_x = self.center[0] + math.cos(angle) * (self.radius - cell.genome.genes['size'] / 2)
+                new_y = self.center[1] + math.sin(angle) * (self.radius - cell.genome.genes['size'] / 2)
+                cell.position = (new_x, new_y)
 
     def update(self, dt, generate_food=True, allow_merge=False):
         self.current_time += dt
@@ -32,6 +50,9 @@ class Environment:
             elif cell.can_divide():
                 new_cell = cell.divide()
                 self.add_cell(new_cell)
+            elif cell.genome.genes['size'] >= cell.max_size:
+                new_cell = cell.divide()
+                self.add_cell(new_cell)
 
         for i, cell in enumerate(self.cells):
             for other_cell in self.cells[i + 1:]:
@@ -40,10 +61,10 @@ class Environment:
                 if distance < (cell.genome.genes['size'] + other_cell.genome.genes['size']) / 2:
                     if allow_merge and cell.type == other_cell.type:
                         self.merge_cells(cell, other_cell)
-                    elif cell.can_consume(other_cell):
+                    elif isinstance(cell, PredatorCell) and cell.can_consume(other_cell):
                         cell.consume(other_cell, self)
                         self.remove_cell(other_cell)
-                    elif other_cell.can_consume(cell):
+                    elif isinstance(other_cell, PredatorCell) and other_cell.can_consume(cell):
                         other_cell.consume(cell, self)
                         self.remove_cell(cell)
 
@@ -65,6 +86,17 @@ class Environment:
                     cell.energy += 5
                     cell.last_eaten = self.current_time  # Update the last eaten time
                     self.food.remove(food)
+
+        # Update specific behaviors for different cell types
+        for cell in self.cells:
+            if isinstance(cell, PhotosyntheticCell):
+                cell.photosynthesize(self, dt)
+            elif isinstance(cell, PredatorCell):
+                cell.hunt(self)
+            elif isinstance(cell, DefensiveCell):
+                cell.defend(self)
+            elif isinstance(cell, ReproductiveCell):
+                cell.reproduce(self)
 
     def merge_cells(self, cell1, cell2):
         # Create a new cell with combined properties

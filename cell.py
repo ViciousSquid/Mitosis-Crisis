@@ -77,12 +77,13 @@ class Cell:
         self.age = 0
         self.dna = dna or self.genome.encode_genes()
         self.angle = random.uniform(0, 2 * math.pi)
-        self.type = "Phagocyte"
+        self.type = "Cell"
         self.nitrogen_reserve = self.genome.genes['nitrogen_reserve']
         self.adhesin = self.genome.genes['adhesin']
         self.radiation_sensitivity = self.genome.genes['radiation_sensitivity']
         self.last_eaten = 0  # Track the last time the cell ate
         self.adhered_cells = []  # List to store adhered cells
+        self.max_size = 32  # Maximum size a cell can reach
 
     def update(self, environment, dt):
         self.age += dt
@@ -91,6 +92,14 @@ class Cell:
         # Energy consumption based on size
         energy_consumption = self.genome.genes['size'] * 0.01 * dt
         self.energy -= energy_consumption
+
+        # Increase energy consumption for larger cells
+        energy_consumption_movement = self.genome.genes['size'] * 0.02 * dt  # Larger cells consume more energy to move
+        self.energy -= energy_consumption_movement
+
+        # Check if the cell has reached the maximum size and divide if necessary
+        if self.genome.genes['size'] >= self.max_size:
+            self.divide()
 
         self.nitrogen_reserve += 0.01 * dt
 
@@ -153,11 +162,21 @@ class Cell:
         child.type = self.type
         self.energy /= 2
         child.energy = self.energy
-        child.nitrogen_reserve = self.nitrogen_reserve / 2
         self.nitrogen_reserve /= 2
+        child.nitrogen_reserve = self.nitrogen_reserve
+
+        # Ensure the child cells are smaller than the parent
+        self.genome.genes['size'] /= 2
+        child.genome.genes['size'] = self.genome.genes['size']
+
         return child
 
     def can_consume(self, other_cell):
+        # Rule 1: Phagocytes can consume Bacteria
+        if self.type == "Phagocyte" and other_cell.type == "Bacteria":
+            return True
+            
+        # Rule 2: General size-based consumption (if not disabled)
         if not self.genome.genes['can_consume']:
             return False
         size_ratio = self.genome.genes['size'] / other_cell.genome.genes['size']
@@ -166,7 +185,13 @@ class Cell:
     def consume(self, other_cell, environment):
         self.energy += other_cell.energy
         self.nitrogen_reserve += other_cell.nitrogen_reserve
-        self.genome.genes['size'] = min(self.genome.genes['size'] + 0.5, 32)  # Increase size slightly, but limit to 32
+        
+        # Increase size by 10% of the consumed cell's size when consuming another cell
+        self.genome.genes['size'] += other_cell.genome.genes['size'] * 0.1
+        
+        # Cap size at 32 to prevent indefinite growth
+        self.genome.genes['size'] = min(self.genome.genes['size'], 32)
+        
         self.last_eaten = environment.current_time  # Update the last eaten time
 
         # Cap energy at 100
@@ -209,10 +234,18 @@ class Cell:
     def resolve_boundary_collision(self, environment):
         distance = math.sqrt((self.position[0] - environment.center[0]) ** 2 + (self.position[1] - environment.center[1]) ** 2)
         if distance > environment.radius - self.genome.genes['size'] / 2:
-            angle = math.atan2(environment.center[1] - self.position[1], environment.center[0] - self.position[0])
-            new_x = environment.center[0] + math.cos(angle) * (environment.radius - self.genome.genes['size'] / 2)
-            new_y = environment.center[1] + math.sin(angle) * (environment.radius - self.genome.genes['size'] / 2)
-            self.position = (new_x, new_y)
+            if environment.wrap_around:
+                # Wrap around the edges
+                self.position = (
+                    (self.position[0] - environment.center[0] + environment.radius) % (2 * environment.radius) + environment.center[0],
+                    (self.position[1] - environment.center[1] + environment.radius) % (2 * environment.radius) + environment.center[1]
+                )
+            else:
+                # Bounce back from the boundary
+                angle = math.atan2(environment.center[1] - self.position[1], environment.center[0] - self.position[0])
+                new_x = environment.center[0] + math.cos(angle) * (environment.radius - self.genome.genes['size'] / 2)
+                new_y = environment.center[1] + math.sin(angle) * (environment.radius - self.genome.genes['size'] / 2)
+                self.position = (new_x, new_y)
 
 class Bacteria(Cell):
     def __init__(self, genome, position, dna=None):
@@ -245,3 +278,73 @@ class Photocyte(Cell):
 
     def update(self, environment, dt):
         super().update(environment, dt)
+
+class PredatorCell(Cell):
+    def __init__(self, genome, position, dna=None):
+        super().__init__(genome, position, dna)
+        self.type = "Predator"
+        self.genome.genes['speed'] *= 1.5  # Predators are faster
+        self.genome.genes['can_consume'] = True  # Predators can consume other cells
+        self.hunting_efficiency = random.uniform(0.5, 1.5)  # Efficiency in hunting
+
+    def update(self, environment, dt):
+        super().update(environment, dt)
+        self.hunt(environment)
+
+    def hunt(self, environment):
+        for cell in environment.cells:
+            if cell != self and self.can_consume(cell):
+                distance = math.sqrt((self.position[0] - cell.position[0]) ** 2 + (self.position[1] - cell.position[1]) ** 2)
+                if distance < self.genome.genes['size']:
+                    self.consume(cell, environment)
+                    break
+
+class PhotosyntheticCell(Cell):
+    def __init__(self, genome, position, dna=None):
+        super().__init__(genome, position, dna)
+        self.type = "Photosynthetic"
+        self.light_sensitivity = random.uniform(0.5, 1.5)  # Sensitivity to light
+
+    def update(self, environment, dt):
+        super().update(environment, dt)
+        self.photosynthesize(environment, dt)
+
+    def photosynthesize(self, environment, dt):
+        # Simulate photosynthesis by converting light into energy
+        light_energy = self.light_sensitivity * dt
+        self.energy += light_energy
+        self.energy = min(100, self.energy)  # Cap energy at 100
+
+class DefensiveCell(Cell):
+    def __init__(self, genome, position, dna=None):
+        super().__init__(genome, position, dna)
+        self.type = "Defensive"
+        self.defense_strength = random.uniform(0.5, 1.5)  # Strength of defense
+
+    def update(self, environment, dt):
+        super().update(environment, dt)
+        self.defend(environment)
+
+    def defend(self, environment):
+        # Simulate defense by protecting nearby cells
+        for cell in environment.cells:
+            if cell != self and self.check_collision(cell):
+                cell.energy += self.defense_strength * dt
+                cell.energy = min(100, cell.energy)  # Cap energy at 100
+
+class ReproductiveCell(Cell):
+    def __init__(self, genome, position, dna=None):
+        super().__init__(genome, position, dna)
+        self.type = "Reproductive"
+        self.reproduction_rate = random.uniform(0.5, 1.5)  # Rate of reproduction
+
+    def update(self, environment, dt):
+        super().update(environment, dt)
+        self.reproduce(environment)
+
+    def reproduce(self, environment):
+        # Simulate reproduction by dividing more frequently
+        if self.can_divide():
+            for _ in range(int(self.reproduction_rate)):
+                new_cell = self.divide()
+                environment.add_cell(new_cell)
