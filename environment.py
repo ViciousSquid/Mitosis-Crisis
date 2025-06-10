@@ -1,6 +1,7 @@
 import random
 import math
-from cell import Cell, Genome, PredatorCell, PhotosyntheticCell, DefensiveCell, ReproductiveCell
+# Corrected the import statement to use the actual class names from cell.py
+from cell import Cell, Genome, Phagocyte, Photocyte
 
 # A Quadtree implementation for efficient collision detection
 class Quadtree:
@@ -137,10 +138,12 @@ class Environment:
                     # Handle different types of interactions
                     if allow_merge and cell1.type == cell2.type and cell1 in self.cells and cell2 in self.cells:
                         self.merge_cells(cell1, cell2)
-                    elif isinstance(cell1, PredatorCell) and cell1.can_consume(cell2):
+                    # Replaced PredatorCell with Phagocyte
+                    elif isinstance(cell1, Phagocyte) and cell1.can_consume(cell2):
                         cell1.consume(cell2, self)
                         if cell2 in self.cells: self.remove_cell(cell2)
-                    elif isinstance(cell2, PredatorCell) and cell2.can_consume(cell1):
+                    # Replaced PredatorCell with Phagocyte
+                    elif isinstance(cell2, Phagocyte) and cell2.can_consume(cell1):
                         cell2.consume(cell1, self)
                         if cell1 in self.cells: self.remove_cell(cell1)
                     else: # Default collision response
@@ -165,16 +168,16 @@ class Environment:
                     cell.last_eaten = self.current_time  # Update the last eaten time
                     self.food.remove(food)
 
-        # Update specific behaviors for different cell types
-        for cell in self.cells:
-            if isinstance(cell, PhotosyntheticCell):
-                cell.photosynthesize(self, dt)
-            elif isinstance(cell, PredatorCell):
-                cell.hunt(self)
-            elif isinstance(cell, DefensiveCell):
-                cell.defend(self)
-            elif isinstance(cell, ReproductiveCell):
-                cell.reproduce(self)
+        # Commented out this block as the methods and some classes are not defined in cell.py
+        # for cell in self.cells:
+        #     if isinstance(cell, PhotosyntheticCell):
+        #         cell.photosynthesize(self, dt)
+        #     elif isinstance(cell, PredatorCell):
+        #         cell.hunt(self)
+        #     elif isinstance(cell, DefensiveCell):
+        #         cell.defend(self)
+        #     elif isinstance(cell, ReproductiveCell):
+        #         cell.reproduce(self)
 
     def merge_cells(self, cell1, cell2):
         # Create a new cell with combined properties

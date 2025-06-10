@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit,
                              QComboBox)
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import pyqtSignal, QTimer
-from cell import PhotosyntheticCell, PredatorCell, DefensiveCell, ReproductiveCell
+from cell import Photocyte
 
 class CellEditor(QWidget):
     cell_updated = pyqtSignal(object)
@@ -72,26 +72,9 @@ class CellEditor(QWidget):
 
         # ComboBox for selecting cell type
         self.type_combobox = QComboBox()
-        self.type_combobox.addItems(["Cell", "Predator", "Photosynthetic", "Defensive", "Reproductive"])
+        self.type_combobox.addItems(["Cell", "Bacteria", "Phagocyte", "Photocyte"])
         self.type_combobox.currentTextChanged.connect(self.update_cell_type)
         self.form_layout.addRow("Cell Type", self.type_combobox)
-
-        # Specific gene inputs for different cell types
-        self.light_sensitivity_input = QLineEdit()
-        self.light_sensitivity_input.setEnabled(False)
-        self.form_layout.addRow("Light Sensitivity", self.light_sensitivity_input)
-
-        self.hunting_efficiency_input = QLineEdit()
-        self.hunting_efficiency_input.setEnabled(False)
-        self.form_layout.addRow("Hunting Efficiency", self.hunting_efficiency_input)
-
-        self.defense_strength_input = QLineEdit()
-        self.defense_strength_input.setEnabled(False)
-        self.form_layout.addRow("Defense Strength", self.defense_strength_input)
-
-        self.reproduction_rate_input = QLineEdit()
-        self.reproduction_rate_input.setEnabled(False)
-        self.form_layout.addRow("Reproduction Rate", self.reproduction_rate_input)
 
     def set_cell(self, cell):
         self.cell = cell
@@ -129,35 +112,6 @@ class CellEditor(QWidget):
             # Set cell type
             self.type_combobox.setCurrentText(cell.type)
 
-            # Set specific gene inputs based on cell type
-            if isinstance(cell, PhotosyntheticCell):
-                self.light_sensitivity_input.setText(str(round(cell.light_sensitivity, 2)))
-                self.light_sensitivity_input.setEnabled(True)
-            else:
-                self.light_sensitivity_input.setText("")
-                self.light_sensitivity_input.setEnabled(False)
-
-            if isinstance(cell, PredatorCell):
-                self.hunting_efficiency_input.setText(str(round(cell.hunting_efficiency, 2)))
-                self.hunting_efficiency_input.setEnabled(True)
-            else:
-                self.hunting_efficiency_input.setText("")
-                self.hunting_efficiency_input.setEnabled(False)
-
-            if isinstance(cell, DefensiveCell):
-                self.defense_strength_input.setText(str(round(cell.defense_strength, 2)))
-                self.defense_strength_input.setEnabled(True)
-            else:
-                self.defense_strength_input.setText("")
-                self.defense_strength_input.setEnabled(False)
-
-            if isinstance(cell, ReproductiveCell):
-                self.reproduction_rate_input.setText(str(round(cell.reproduction_rate, 2)))
-                self.reproduction_rate_input.setEnabled(True)
-            else:
-                self.reproduction_rate_input.setText("")
-                self.reproduction_rate_input.setEnabled(False)
-
         else:
             # Clear and disable all fields
             for input_field in self.gene_inputs.values():
@@ -175,14 +129,7 @@ class CellEditor(QWidget):
             self.energy_label.clear()
             self.apply_button.setEnabled(False)
             self.type_combobox.setCurrentText("Cell")
-            self.light_sensitivity_input.clear()
-            self.light_sensitivity_input.setEnabled(False)
-            self.hunting_efficiency_input.clear()
-            self.hunting_efficiency_input.setEnabled(False)
-            self.defense_strength_input.clear()
-            self.defense_strength_input.setEnabled(False)
-            self.reproduction_rate_input.clear()
-            self.reproduction_rate_input.setEnabled(False)
+
 
     def apply_changes(self):
         if self.cell:
@@ -191,15 +138,6 @@ class CellEditor(QWidget):
             self.cell.genome.never_consume = self.never_consume_checkbox.isChecked()
             self.cell_updated.emit(self.cell)
 
-            # Update specific gene inputs based on cell type
-            if isinstance(self.cell, PhotosyntheticCell):
-                self.cell.light_sensitivity = float(self.light_sensitivity_input.text())
-            if isinstance(self.cell, PredatorCell):
-                self.cell.hunting_efficiency = float(self.hunting_efficiency_input.text())
-            if isinstance(self.cell, DefensiveCell):
-                self.cell.defense_strength = float(self.defense_strength_input.text())
-            if isinstance(self.cell, ReproductiveCell):
-                self.cell.reproduction_rate = float(self.reproduction_rate_input.text())
 
     def change_color(self):
         if self.cell:

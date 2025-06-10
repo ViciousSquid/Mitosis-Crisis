@@ -72,6 +72,7 @@ class Genome:
 
 class Cell:
     def __init__(self, genome, position, dna=None):
+        self.id = uuid.uuid4()
         self.genome = genome
         self.position = np.array(position, dtype=float) # Use a numpy array for position
         self.energy = 20
@@ -271,74 +272,3 @@ class Photocyte(Cell):
 
     def update(self, environment, dt):
         super().update(environment, dt)
-
-class PredatorCell(Cell):
-    def __init__(self, genome, position, dna=None):
-        super().__init__(genome, position, dna)
-        self.type = "Predator"
-        self.genome.genes['speed'] *= 1.5  # Predators are faster
-        self.genome.genes['can_consume'] = True  # Predators can consume other cells
-        self.hunting_efficiency = random.uniform(0.5, 1.5)  # Efficiency in hunting
-
-    def update(self, environment, dt):
-        super().update(environment, dt)
-        self.hunt(environment)
-
-    def hunt(self, environment):
-        for cell in environment.cells:
-            if cell != self and self.can_consume(cell):
-                distance = np.linalg.norm(self.position - cell.position)
-                if distance < self.genome.genes['size']:
-                    self.consume(cell, environment)
-                    break
-
-class PhotosyntheticCell(Cell):
-    def __init__(self, genome, position, dna=None):
-        super().__init__(genome, position, dna)
-        self.type = "Photosynthetic"
-        self.light_sensitivity = random.uniform(0.5, 1.5)  # Sensitivity to light
-
-    def update(self, environment, dt):
-        super().update(environment, dt)
-        self.photosynthesize(environment, dt)
-
-    def photosynthesize(self, environment, dt):
-        # Simulate photosynthesis by converting light into energy
-        light_energy = self.light_sensitivity * dt
-        self.energy += light_energy
-        self.energy = min(100, self.energy)  # Cap energy at 100
-
-class DefensiveCell(Cell):
-    def __init__(self, genome, position, dna=None):
-        super().__init__(genome, position, dna)
-        self.type = "Defensive"
-        self.defense_strength = random.uniform(0.5, 1.5)  # Strength of defense
-
-    def update(self, environment, dt):
-        super().update(environment, dt)
-        self.defend(environment)
-
-    def defend(self, environment):
-        # Simulate defense by protecting nearby cells
-        for cell in environment.cells:
-            if cell != self and self.check_collision(cell):
-                cell.energy += self.defense_strength * dt
-                cell.energy = min(100, cell.energy)  # Cap energy at 100
-
-class ReproductiveCell(Cell):
-    def __init__(self, genome, position, dna=None):
-        super().__init__(genome, position, dna)
-        self.type = "Reproductive"
-        self.reproduction_rate = random.uniform(0.5, 1.5)  # Rate of reproduction
-
-    def update(self, environment, dt):
-        super().update(environment, dt)
-        self.reproduce(environment)
-
-    def reproduce(self, environment):
-        # Simulate reproduction by dividing more frequently
-        if self.can_divide():
-            for _ in range(int(self.reproduction_rate)):
-                new_cell = self.divide()
-                if new_cell:
-                    environment.add_cell(new_cell)

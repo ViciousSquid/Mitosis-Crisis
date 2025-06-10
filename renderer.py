@@ -1,14 +1,62 @@
-from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsEllipseItem, QGraphicsPolygonItem, QToolButton, QVBoxLayout, QWidget, QLabel
+from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem, QGraphicsPolygonItem, QToolButton, QVBoxLayout, QWidget, QLabel
 from PyQt5.QtGui import QColor, QPen, QPainter, QPolygonF
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 import math
 
-class CellItem(QGraphicsEllipseItem):
-    def __init__(self, cell, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class CellItem(QGraphicsItem):
+    def __init__(self, cell):
+        super().__init__()
         self.cell = cell
-        self.setFlag(QGraphicsEllipseItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+
+    def boundingRect(self):
+        size = max(self.cell.genome.genes['size'], 15)
+        extra = 0
+        if self.cell.genome.genes['has_tail']:
+            extra = size * 1.5
+        if self.cell.adhesin:
+            extra = max(extra, 20)
+        
+        return QRectF(-size/2 - extra, -size/2 - extra, size + extra*2, size + extra*2)
+
+    def paint(self, painter, option, widget):
+        painter.setPen(QPen(Qt.black, 0.5))
+        color = QColor.fromRgbF(*self.cell.genome.genes['color'])
+        size = max(self.cell.genome.genes['size'], 15)
+
+        if self.cell.adhesin:
+            adhesin_size = size + 20
+            adhesin_color = QColor(color)
+            adhesin_color.setAlpha(100)
+            painter.setBrush(adhesin_color)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QRectF(-adhesin_size / 2, -adhesin_size / 2, adhesin_size, adhesin_size))
+
+        painter.setBrush(color)
+        painter.setPen(QPen(Qt.black, 0.5))
+        painter.drawEllipse(QRectF(-size / 2, -size / 2, size, size))
+
+        if self.cell.genome.genes['has_tail']:
+            tail_length = size * 1.5
+            angle = self.cell.angle
+            tail_end_x = math.cos(angle) * tail_length
+            tail_end_y = math.sin(angle) * tail_length
+
+            tail_polygon = QPolygonF([
+                QPointF(0, 0),
+                QPointF(-size / 4, -size / 4),
+                QPointF(tail_end_x, tail_end_y),
+                QPointF(size / 4, -size / 4)
+            ])
+            painter.setBrush(color)
+            painter.drawPolygon(tail_polygon)
+
+        if self.isSelected():
+            pen = QPen(Qt.red, 3)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QRectF(-size / 2, -size / 2, size, size))
 
 class Renderer(QGraphicsView):
     cell_selected = pyqtSignal(object)
@@ -19,11 +67,14 @@ class Renderer(QGraphicsView):
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setRenderHint(QPainter.Antialiasing)
-        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.selected_cell = None
         self.draw_food_mode = False
         self.erase_food_mode = False
+
+        self.cell_items = {}
+        self.food_items = {}
 
         self.draw_food_button = QToolButton()
         self.draw_food_button.setText("Draw Food")
@@ -48,95 +99,76 @@ class Renderer(QGraphicsView):
 
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        self.boundary_item = QGraphicsEllipseItem(0, 0, self.environment.radius * 2, self.environment.radius * 2)
+        self.boundary_item.setPen(QPen(Qt.black, 2))
+        self.scene.addItem(self.boundary_item)
 
-    def render(self):
-        # Store the current transformation
-        current_transform = self.transform()
-
-        self.scene.clear()
-
-        boundary = QGraphicsEllipseItem(0, 0, self.environment.radius * 2, self.environment.radius * 2)
-        boundary.setPen(QPen(Qt.black, 2))
-        self.scene.addItem(boundary)
-
+    def update_scene(self):
+        current_cell_ids = set()
         for cell in self.environment.cells:
-            x, y = cell.position
-            size = max(cell.genome.genes['size'], 15)
-            color = QColor.fromRgbF(*cell.genome.genes['color'])
+            current_cell_ids.add(cell.id)
+            if cell.id in self.cell_items:
+                cell_item = self.cell_items[cell.id]
+                cell_item.setPos(cell.position[0], cell.position[1])
+                cell_item.update()
+            else:
+                self.add_cell_item(cell)
 
-            if cell.adhesin:
-                adhesin_size = size + 20
-                adhesin_color = QColor(color)
-                adhesin_color.setAlpha(100)
-                adhesin_item = QGraphicsEllipseItem(x - adhesin_size / 2, y - adhesin_size / 2, adhesin_size, adhesin_size)
-                adhesin_item.setBrush(adhesin_color)
-                adhesin_item.setPen(QPen(Qt.NoPen))
-                self.scene.addItem(adhesin_item)
+        removed_ids = self.cell_items.keys() - current_cell_ids
+        for cell_id in removed_ids:
+            self.scene.removeItem(self.cell_items[cell_id])
+            del self.cell_items[cell_id]
 
-            cell_item = CellItem(cell, x - size / 2, y - size / 2, size, size)
-            cell_item.setBrush(color)
-            cell_item.setPen(QPen(Qt.black, 0.5))
-            self.scene.addItem(cell_item)
+        current_food_pos = set(self.environment.food)
+        for pos in current_food_pos:
+            if pos not in self.food_items:
+                food_item = QGraphicsEllipseItem(pos[0] - 1, pos[1] - 1, 2, 2)
+                food_item.setBrush(Qt.green)
+                self.scene.addItem(food_item)
+                self.food_items[pos] = food_item
 
-            if cell.genome.genes['has_tail']:
-                tail_length = size * 1.5
-                tail_end_x = x + math.cos(cell.angle) * tail_length
-                tail_end_y = y + math.sin(cell.angle) * tail_length
-                tail = QGraphicsPolygonItem(QPolygonF([
-                    QPointF(x, y),
-                    QPointF(x - size / 4, y - size / 4),
-                    QPointF(tail_end_x, tail_end_y),
-                    QPointF(x + size / 4, y - size / 4)
-                ]))
-                tail.setBrush(color)
-                self.scene.addItem(tail)
-
-        for food in self.environment.food:
-            x, y = food
-            food_item = QGraphicsEllipseItem(x - 1, y - 1, 2, 2)
-            food_item.setBrush(Qt.green)
-            self.scene.addItem(food_item)
+        removed_food = self.food_items.keys() - current_food_pos
+        for pos in removed_food:
+            self.scene.removeItem(self.food_items[pos])
+            del self.food_items[pos]
 
         if self.selected_cell:
-            self.highlight_cell(self.selected_cell)
             self.energy_label.setText(f"Energy: {self.selected_cell.energy:.2f}")
 
-        # The collision resolution logic has been moved to environment.py for efficiency.
-
-        # Restore the transformation
-        self.setTransform(current_transform)
-
-    def highlight_cell(self, cell):
-        for item in self.scene.items():
-            if isinstance(item, CellItem) and item.cell == cell:
-                pen = QPen(Qt.red, 3) # Changed the thickness to 3
-                pen.setStyle(Qt.DashLine) # Added a dash line style for more visibility
-                item.setPen(pen)
-                break
+    def add_cell_item(self, cell):
+        cell_item = CellItem(cell)
+        cell_item.setPos(cell.position[0], cell.position[1])
+        self.scene.addItem(cell_item)
+        self.cell_items[cell.id] = cell_item
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             item = self.itemAt(event.pos())
             if isinstance(item, CellItem):
+                if self.selected_cell and self.selected_cell.id in self.cell_items:
+                    self.cell_items[self.selected_cell.id].setSelected(False)
+
                 self.selected_cell = item.cell
+                item.setSelected(True)
                 self.cell_selected.emit(item.cell)
-                self.render()
             else:
+                if self.selected_cell and self.selected_cell.id in self.cell_items:
+                    self.cell_items[self.selected_cell.id].setSelected(False)
                 self.selected_cell = None
                 self.cell_selected.emit(None)
-                self.render()
 
             if self.draw_food_mode:
                 pos = self.mapToScene(event.pos())
                 self.environment.food.append((pos.x(), pos.y()))
-                self.render()
+                self.update_scene()
             elif self.erase_food_mode:
                 pos = self.mapToScene(event.pos())
                 for food in self.environment.food[:]:
                     x, y = food
                     if math.sqrt((pos.x() - x) ** 2 + (pos.y() - y) ** 2) < 5:
                         self.environment.food.remove(food)
-                        self.render()
+                        self.update_scene()
                         break
         super().mousePressEvent(event)
 
@@ -152,25 +184,13 @@ class Renderer(QGraphicsView):
             self.draw_food_button.setChecked(False)
             self.draw_food_mode = False
 
-    def itemMoved(self, item):
-        pos = item.scenePos()
-        distance = math.sqrt((pos.x() - self.environment.center[0]) ** 2 + (pos.y() - self.environment.center[1]) ** 2)
-        if distance > self.environment.radius:
-            angle = math.atan2(self.environment.center[1] - pos.y(), self.environment.center[0] - pos.x())
-            new_x = self.environment.center[0] + math.cos(angle) * self.environment.radius
-            new_y = self.environment.center[1] + math.sin(angle) * self.environment.radius
-            item.setPos(new_x - item.cell.genome.genes['size'] / 2, new_y - item.cell.genome.genes['size'] / 2)
-            item.cell.position = (new_x, new_y)
-        else:
-            item.cell.position = (pos.x(), pos.y())
-        self.render()
-
     def mouseMoveEvent(self, event):
-        if self.selected_cell:
-            pos = self.mapToScene(event.pos())
-            self.selected_cell.position = (pos.x(), pos.y())
-            self.render()
-        super().mouseMoveEvent(event)
+        if self.selected_cell and self.cell_items[self.selected_cell.id].isUnderMouse():
+             pos = self.mapToScene(event.pos())
+             self.selected_cell.position = (pos.x(), pos.y())
+             self.cell_items[self.selected_cell.id].setPos(pos)
+        else:
+            super().mouseMoveEvent(event)
 
     def zoom_in(self):
         self.scale(1.2, 1.2)

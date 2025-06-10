@@ -119,9 +119,8 @@ class MainWindow(QMainWindow):
     def update_simulation(self):
         self.simulation.update(
             generate_food=self.generate_food_checkbox.isChecked(),
-            #allow_merge=self.merge_cells_checkbox.isChecked()
         )
-        self.renderer.render()
+        self.renderer.update_scene()
         self.cell_count_label.setText(f"Cell Count: {len(self.environment.cells)}")
 
     def add_random_cell(self, cell_type):
@@ -140,7 +139,7 @@ class MainWindow(QMainWindow):
             cell = Cell(Genome(), (x, y))
 
         self.environment.add_cell(cell)
-        self.renderer.render()
+        self.renderer.update_scene()
 
     def delete_selected_cell(self):
         if self.renderer.selected_cell:
@@ -149,7 +148,7 @@ class MainWindow(QMainWindow):
             self.cell_editor.set_cell(None)
             self.dna_viewer.set_cell(None)
             self.delete_cell_button.setEnabled(False)
-            self.renderer.render()
+            self.renderer.update_scene()
 
     def on_cell_selected(self, cell):
         self.cell_editor.set_cell(cell)
@@ -157,7 +156,8 @@ class MainWindow(QMainWindow):
         self.delete_cell_button.setEnabled(cell is not None)
 
     def on_cell_updated(self, cell):
-        self.renderer.render()
+        if cell and cell.id in self.renderer.cell_items:
+            self.renderer.cell_items[cell.id].update()
 
     def populate_random(self):
         for _ in range(5):
@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
             x = self.environment.center[0] + math.cos(angle) * distance
             y = self.environment.center[1] + math.sin(angle) * distance
             self.environment.food.append((x, y))
-        self.renderer.render()
+        self.renderer.update_scene()
 
     def zoom_in(self):
         self.renderer.zoom_in()
@@ -188,13 +188,3 @@ class MainWindow(QMainWindow):
             self.renderer.scroll(10, 0)
         else:
             super().keyPressEvent(event)
-
-# Assuming the Renderer class has the following methods:
-# def zoom_in(self):
-#     pass
-#
-# def zoom_out(self):
-#     pass
-#
-# def scroll(self, dx, dy):
-#     pass
