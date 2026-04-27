@@ -187,7 +187,7 @@ class GeneRow(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Cells — Spore‑Style Simulation")
+        self.setWindowTitle("Splitsville")
         self.setGeometry(100, 100, 1280, 720)
 
         root = QWidget()
