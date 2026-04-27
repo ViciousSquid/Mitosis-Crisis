@@ -1,4 +1,4 @@
-# Mitosis Crisis
+# Splitsville
 
 Observe cells as they live, move, eat, divide, and evolve in a contained environment.
 #### Also functions as a good CPU and GPU stress tester (just click "Random" a few times and let it run!)
