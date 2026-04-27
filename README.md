@@ -17,3 +17,30 @@ Observe cells as they live, move, eat, divide, and evolve in a contained environ
 
 
 
+--------------------------
+
+ #### 🚀 Quickstart:
+
+ Python 3.10+ is required
+ 
+ 1. Clone and Enter the Directory:
+```bash
+git clone https://github.com/ViciousSquid/Mitosis-Crisis.git
+cd Mitosis-Crisis
+```
+2. Setup Virtual Environment (Recommended)
+```bash
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+```
+3. Install Dependencies:
+```bash
+pip install -r requirements.txt
+```
+4. Launch the Editor:
+```bash
+python main.py
+```
