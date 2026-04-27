@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QCheckBox, QSlider,
                              QGroupBox, QComboBox, QScrollArea, QDoubleSpinBox,
                              QFileDialog, QSizePolicy)
-from PyQt5.QtCore import QTimer, Qt, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPainter
 import random
 import math
@@ -13,9 +13,6 @@ from environment import Environment
 from cell import Cell, Genome, Bacteria, Phagocyte, Photocyte
 from file_io import save_genome, load_genome
 
-# ---------------------------------------------------------------------------
-# DNA STRIP for 128‑bit DNA
-# ---------------------------------------------------------------------------
 
 BIT_TO_BASE = {0: 'C', 1: 'G', 2: 'A', 3: 'T'}
 BASE_COLORS = {
@@ -109,10 +106,6 @@ class DNADock(QWidget):
             p.drawText(rect, Qt.AlignCenter, base)
 
 
-# ---------------------------------------------------------------------------
-# GENE EDITOR FIELDS
-# ---------------------------------------------------------------------------
-
 GENE_FIELDS = [
     ('division_threshold', 0,  8, 10.0, 'Division Threshold', 0, 25.5, 0.1),
     ('energy_efficiency',  8,  8, 10.0, 'Energy Efficiency',  0, 25.5, 0.1),
@@ -180,10 +173,6 @@ class GeneRow(QWidget):
             self.spin.setValue(float(v))
 
 
-# ---------------------------------------------------------------------------
-# MAIN WINDOW
-# ---------------------------------------------------------------------------
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -197,18 +186,16 @@ class MainWindow(QMainWindow):
         content_layout = QHBoxLayout()
         self.root_layout.addLayout(content_layout, 1)
 
-        # ----- left: simulation area -----
         sim_layout = QVBoxLayout()
         content_layout.addLayout(sim_layout, 3)
 
         self.environment = Environment(250)
-        self._randomise_light_source()          # random light at start
+        self._randomise_light_source()
 
         self.renderer = Renderer(self.environment)
         self.renderer.cell_selected.connect(self.on_cell_selected)
         sim_layout.addWidget(self.renderer, 1)
 
-        # Control row (food, zoom etc.)
         ctrl_row = QHBoxLayout()
         sim_layout.addLayout(ctrl_row)
 
@@ -235,7 +222,6 @@ class MainWindow(QMainWindow):
         self.zoom_out_button.clicked.connect(self.renderer.zoom_out)
         ctrl_row.addWidget(self.zoom_out_button)
 
-        # Simulation control row
         sim_ctrl = QHBoxLayout()
         sim_layout.addLayout(sim_ctrl)
 
@@ -269,7 +255,6 @@ class MainWindow(QMainWindow):
         self.random_button.clicked.connect(self.populate_random)
         sim_ctrl.addWidget(self.random_button)
 
-        # ----- right sidebar: gene editor + light controls -----
         right_layout = QVBoxLayout()
         content_layout.addLayout(right_layout, 1)
 
@@ -289,7 +274,6 @@ class MainWindow(QMainWindow):
         self.gene_editor_container.setVisible(False)
         right_layout.addWidget(self.scroll_area, 1)
 
-        # --- Light Source Control Group ---
         light_group = QGroupBox("☀ Light Source")
         light_group.setStyleSheet(
             "QGroupBox { font-weight: bold; border: 1px solid #555;"
@@ -341,7 +325,6 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(light_group)
 
-        # Gene save/load buttons
         io_layout = QHBoxLayout()
         self.save_btn = QPushButton("Save Cell")
         self.save_btn.clicked.connect(self._save_cell_genome)
@@ -359,69 +342,63 @@ class MainWindow(QMainWindow):
         self.apply_btn.setVisible(False)
         right_layout.addWidget(self.apply_btn)
 
-        # DNA dock at bottom
         self.dna_dock = DNADock()
         self.root_layout.addWidget(self.dna_dock)
 
+        # Replaced QTimer with decoupled thread engine
         self.simulation = SimulationEngine(self.environment)
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_simulation)
+        self.simulation.frame_ready.connect(self.update_simulation_ui)
 
-        # Gene rows
         self.gene_rows = {}
         self._setup_gene_editor()
 
-    # ------------------------------------------------------------------
-    # Light source helpers
-    # ------------------------------------------------------------------
     def _randomise_light_source(self):
-        """Randomise light position, intensity, and colour slightly."""
-        cx, cy = self.environment.center
-        radius = self.environment.radius
-        angle = random.uniform(0, 2 * math.pi)
-        dist = random.uniform(0, radius * 0.8)
-        lx = cx + math.cos(angle) * dist
-        ly = cy + math.sin(angle) * dist
-        self.environment.light_source = (lx, ly)
+        with self.environment.lock:
+            cx, cy = self.environment.center
+            radius = self.environment.radius
+            angle = random.uniform(0, 2 * math.pi)
+            dist = random.uniform(0, radius * 0.8)
+            lx = cx + math.cos(angle) * dist
+            ly = cy + math.sin(angle) * dist
+            self.environment.light_source = (lx, ly)
 
-        self.environment.light_intensity = random.uniform(0.5, 1.5)
-        r = random.uniform(0.7, 1.0)
-        g = random.uniform(0.7, 1.0)
-        b = random.uniform(0.5, 0.9)
-        self.environment.light_color = (int(r*255), int(g*255), int(b*255))
+            self.environment.light_intensity = random.uniform(0.5, 1.5)
+            r = random.uniform(0.7, 1.0)
+            g = random.uniform(0.7, 1.0)
+            b = random.uniform(0.5, 0.9)
+            self.environment.light_color = (int(r*255), int(g*255), int(b*255))
 
-        # Update UI if already created
-        if hasattr(self, 'intensity_slider'):
-            self.intensity_slider.setValue(int(self.environment.light_intensity * 100))
-            self.intensity_label.setText(f"{self.environment.light_intensity:.2f}×")
-        # colour preset combobox not updated – user can change manually
+            if hasattr(self, 'intensity_slider'):
+                self.intensity_slider.setValue(int(self.environment.light_intensity * 100))
+                self.intensity_label.setText(f"{self.environment.light_intensity:.2f}×")
 
     def toggle_light_enabled(self, enabled):
-        self.environment.light_enabled = enabled
+        with self.environment.lock:
+            self.environment.light_enabled = enabled
         self.move_light_checkbox.setEnabled(enabled)
         if not enabled:
             self.move_light_checkbox.setChecked(False)
         self.renderer.update()
 
     def centre_light(self):
-        cx, cy = self.environment.center
-        self.environment.light_source = (cx, cy)
+        with self.environment.lock:
+            cx, cy = self.environment.center
+            self.environment.light_source = (cx, cy)
         self.renderer.update()
 
     def on_light_colour_changed(self, index):
         _, rgb = self.light_presets[index]
-        self.environment.light_color = rgb
+        with self.environment.lock:
+            self.environment.light_color = rgb
         self.renderer.update()
 
     def on_intensity_changed(self, value):
         intensity = value / 100.0
-        self.environment.light_intensity = intensity
+        with self.environment.lock:
+            self.environment.light_intensity = intensity
         self.intensity_label.setText(f"{intensity:.2f}×")
         self.renderer.update()
 
-    # ------------------------------------------------------------------
-    # Gene editor setup
-    # ------------------------------------------------------------------
     def _setup_gene_editor(self):
         for gene_def in GENE_FIELDS:
             name, shift, bits, scale, label, minv, maxv, step = gene_def
@@ -499,36 +476,29 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error loading genome: {e}")
 
-    # ------------------------------------------------------------------
-    # Simulation control
-    # ------------------------------------------------------------------
     def toggle_simulation(self):
-        if self.timer.isActive():
-            self.timer.stop()
+        if self.simulation.isRunning():
+            self.simulation.stop()
             self.start_button.setText("▶ Start")
             self.start_button.setStyleSheet("background-color: #2d7a2d; color: white; font-weight: bold; padding: 4px 12px; border-radius: 4px;")
         else:
-            self.timer.start(16)
+            self.simulation.generate_food = self.generate_food_checkbox.isChecked()
+            self.simulation.start()
             self.start_button.setText("⏹ Stop")
             self.start_button.setStyleSheet("background-color: #8b1a1a; color: white; font-weight: bold; padding: 4px 12px; border-radius: 4px;")
 
-    def update_simulation(self):
-        self.simulation.update(generate_food=self.generate_food_checkbox.isChecked())
-        self.renderer.update_scene()
-        self.cell_count_label.setText(f"Cells: {len(self.environment.cells)}")
+    def update_simulation_ui(self):
+        with self.environment.lock:
+            self.renderer.update_scene()
+            self.cell_count_label.setText(f"Cells: {len(self.environment.cells)}")
 
-        # Real-time update of selected cell's energy
-        if hasattr(self, 'selected_cell') and self.selected_cell is not None:
-            if self.selected_cell in self.environment.cells:
-                self.info_label.setText(f"{self.selected_cell.type} | Energy: {self.selected_cell.energy:.2f}")
-            else:
-                # Cell no longer exists, deselect
-                self.selected_cell = None
-                self.on_cell_selected(None)
+            if hasattr(self, 'selected_cell') and self.selected_cell is not None:
+                if self.selected_cell in self.environment.cells:
+                    self.info_label.setText(f"{self.selected_cell.type} | Energy: {self.selected_cell.energy:.2f}")
+                else:
+                    self.selected_cell = None
+                    self.on_cell_selected(None)
 
-    # ------------------------------------------------------------------
-    # Cell management
-    # ------------------------------------------------------------------
     def _random_position(self):
         angle = random.uniform(0, 2 * math.pi)
         dist = random.uniform(0, self.environment.radius * 0.85)
@@ -536,21 +506,23 @@ class MainWindow(QMainWindow):
         return cx + math.cos(angle) * dist, cy + math.sin(angle) * dist
 
     def add_random_cell(self, cell_type):
-        x, y = self._random_position()
-        if cell_type == "bacteria":
-            cell = Bacteria(Genome(), (x, y))
-        elif cell_type == "phagocyte":
-            cell = Phagocyte(Genome(), (x, y))
-        elif cell_type == "photocyte":
-            cell = Photocyte(Genome(), (x, y))
-        else:
-            cell = Cell(Genome(), (x, y))
-        self.environment.add_cell(cell)
+        with self.environment.lock:
+            x, y = self._random_position()
+            if cell_type == "bacteria":
+                cell = Bacteria(Genome(), (x, y))
+            elif cell_type == "phagocyte":
+                cell = Phagocyte(Genome(), (x, y))
+            elif cell_type == "photocyte":
+                cell = Photocyte(Genome(), (x, y))
+            else:
+                cell = Cell(Genome(), (x, y))
+            self.environment.add_cell(cell)
         self.renderer.update_scene()
 
     def delete_selected_cell(self):
         if hasattr(self, "selected_cell") and self.selected_cell:
-            self.environment.remove_cell(self.selected_cell)
+            with self.environment.lock:
+                self.environment.remove_cell(self.selected_cell)
             self.selected_cell = None
             self.dna_dock.set_dna(0)
             self.gene_editor_container.setVisible(False)
@@ -559,15 +531,15 @@ class MainWindow(QMainWindow):
             self.load_btn.setVisible(False)
 
     def populate_random(self):
-        """Add a variety of cells and some food, similar to origin.py."""
-        for _ in range(3):
-            self.add_random_cell("cell")
-            self.add_random_cell("bacteria")
-            self.add_random_cell("photocyte")
-        self.add_random_cell("phagocyte")
-        for _ in range(30):
-            x, y = self._random_position()
-            self.environment.food.append((x, y))
+        with self.environment.lock:
+            for _ in range(3):
+                self.add_random_cell("cell")
+                self.add_random_cell("bacteria")
+                self.add_random_cell("photocyte")
+            self.add_random_cell("phagocyte")
+            for _ in range(30):
+                x, y = self._random_position()
+                self.environment.food.append((x, y))
         self.renderer.update_scene()
 
     def _toggle_move_light(self, checked):
@@ -578,7 +550,7 @@ class MainWindow(QMainWindow):
         if not cell:
             self.info_label.setText("No cell selected")
             self.info_label.setFont(self.default_info_font)
-            self.dna_dock.set_dna(None)   # <-- changed from 0
+            self.dna_dock.set_dna(None)
             self.gene_editor_container.setVisible(False)
             self.apply_btn.setVisible(False)
             self.save_btn.setVisible(False)

@@ -1,6 +1,7 @@
 import random
 import math
 import numpy as np
+import threading
 from cell import Cell, Genome, Phagocyte, Photocyte
 
 
@@ -73,28 +74,25 @@ class Environment:
         self._spatial_grid = SpatialGrid(cell_size=32)
         self._collision_frame = False
 
-        # Death markers: each is (x, y, cell_size, remaining_time)
         self.death_markers = []
-
-        # Score system
         self.score = 0
         self.combo_count = 0
         self.last_score_time = -10.0
         self.combo_timeout = 3.0
         self.popup_lifetime = 1.5
-        self.score_popups = []  # (x, y, text, r, g, b, remaining_time, font_size)
+        self.score_popups = []
 
-        # Stagger queue for floating text — prevents visual clutter when many events fire at once
-        self._popup_queue = []  # list of (x, y, text, r, g, b, font_size)
+        self._popup_queue = []
         self._popup_stagger_timer = 0.0
-        self.popup_stagger_delay = 0.08  # seconds between each popup appearing
+        self.popup_stagger_delay = 0.08
+
+        # Thread synchronization lock
+        self.lock = threading.RLock()
 
     def add_death_marker(self, x, y, cell_size, duration=1.2):
-        """Add a temporary 'DIED' marker scaled to cell size."""
         self.death_markers.append((x, y, cell_size, duration))
 
     def update_death_markers(self, dt):
-        """Update marker lifetimes and remove expired ones."""
         self.death_markers = [(x, y, sz, t - dt) for (x, y, sz, t) in self.death_markers if t - dt > 0]
 
     def add_cell(self, cell):
@@ -105,7 +103,6 @@ class Environment:
             self.cells.remove(cell)
 
     def _add_score_event(self, x, y, cell_size, is_positive):
-        """Award or penalise score with combo multiplier. Queue popup for staggered release."""
         if self.current_time - self.last_score_time > self.combo_timeout:
             self.combo_count = 0
         self.combo_count += 1
@@ -129,14 +126,10 @@ class Environment:
         if self.combo_count > 1:
             text += f" x{multiplier:.1f}"
 
-        # Smaller dynamic font: range ~6–11 pt instead of 10–18 pt
         font_size = max(6, min(11, int(5 + cell_size / 3)))
-
-        # Queue the popup instead of spawning immediately
         self._popup_queue.append((x, y, text, r, g, b, font_size))
 
     def _release_queued_popups(self, dt):
-        """Drain the stagger queue, releasing one popup every stagger_delay seconds."""
         if not self._popup_queue:
             self._popup_stagger_timer = 0.0
             return
@@ -149,11 +142,7 @@ class Environment:
 
     def update(self, dt, generate_food=True, allow_merge=False):
         self.current_time += dt
-
-        # Release staggered popups
         self._release_queued_popups(dt)
-
-        # Update death markers (they fade over time)
         self.update_death_markers(dt)
 
         grid = self._spatial_grid
@@ -266,11 +255,9 @@ class Environment:
         if self.food and self.cells:
             self._consume_food_numpy()
 
-        # Decay combo if timed out
         if self.current_time - self.last_score_time > self.combo_timeout:
             self.combo_count = 0
 
-        # Update score popup lifetimes
         self.score_popups = [(x, y, text, r, g, b, t - dt, fs)
                              for (x, y, text, r, g, b, t, fs) in self.score_popups
                              if t - dt > 0]

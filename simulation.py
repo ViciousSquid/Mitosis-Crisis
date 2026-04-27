@@ -1,19 +1,41 @@
 import time
+from PyQt5.QtCore import QThread, pyqtSignal
 
-class SimulationEngine:
+class SimulationEngine(QThread):
+    frame_ready = pyqtSignal()
+
     def __init__(self, environment):
+        super().__init__()
         self.environment = environment
-        self.time_step = 0.1  # seconds
-        self.simulation_speed = 1.0  # 1.0 is real-time
+        self.time_step = 0.016  # Target 60 FPS update rate
+        self.simulation_speed = 1.0
+        self._is_running = False
+        self.generate_food = True
+        self.allow_merge = False
 
-    def update(self, generate_food=True, allow_merge=False):
-        self.environment.update(self.time_step, generate_food, allow_merge)
+    def run(self):
+        self._is_running = True
+        while self._is_running:
+            start_time = time.perf_counter()
 
-    def run_for_duration(self, duration, generate_food=True, allow_merge=False):
-        steps = int(duration / self.time_step)
-        for _ in range(steps):
-            self.update(generate_food, allow_merge)
-            time.sleep(self.time_step / self.simulation_speed)
+            # Acquire lock before modifying state
+            with self.environment.lock:
+                self.environment.update(self.time_step, self.generate_food, self.allow_merge)
+
+            # Signal GUI to render
+            self.frame_ready.emit()
+
+            # Manage tick rate
+            elapsed = time.perf_counter() - start_time
+            target_delay = self.time_step / self.simulation_speed
+            sleep_time = target_delay - elapsed
+
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def stop(self):
+        self._is_running = False
+        self.wait()
 
     def fast_forward(self, speed_factor):
         self.simulation_speed = speed_factor
