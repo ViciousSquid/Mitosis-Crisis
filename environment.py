@@ -72,7 +72,6 @@ class Environment:
         self.light_enabled = True
 
         self._spatial_grid = SpatialGrid(cell_size=32)
-        self._collision_frame = False
 
         self.death_markers = []
         self.score = 0
@@ -85,6 +84,10 @@ class Environment:
         self._popup_queue = []
         self._popup_stagger_timer = 0.0
         self.popup_stagger_delay = 0.08
+
+        # Merge overlap threshold — cells that overlap by this fraction
+        # of min_dist AND both have adhesin AND same type will merge.
+        self.merge_overlap_fraction = 0.60
 
         # Thread synchronization lock
         self.lock = threading.RLock()
@@ -182,64 +185,94 @@ class Environment:
                                   float(weakest._body_size), False)
             weakest.die(self)
 
+        # Rebuild the spatial grid after births/deaths so collision
+        # queries use up-to-date positions.
         grid.clear()
         for cell in self.cells:
             grid.insert(cell, float(cell.position[0]), float(cell.position[1]))
 
-        self._collision_frame = not self._collision_frame
-        if self._collision_frame:
-            alive_set = set(self.cells)
-            cells_snapshot = self.cells[:]
-            for cell1 in cells_snapshot:
-                if cell1 not in alive_set:
+        # ── Collision resolution (runs every frame) ───────────────────
+        alive_set = set(self.cells)
+        cells_snapshot = self.cells[:]
+        for cell1 in cells_snapshot:
+            if cell1 not in alive_set:
+                continue
+            id1 = id(cell1)
+            s1 = cell1._cached_size
+            px1 = float(cell1.position[0])
+            py1 = float(cell1.position[1])
+            search_r = s1 + 32
+            nearby = grid.query(px1, py1, search_r)
+            for cell2 in nearby:
+                id2 = id(cell2)
+                if id2 <= id1 or cell2 not in alive_set:
                     continue
-                id1 = id(cell1)
-                s1 = cell1._cached_size
-                px1 = float(cell1.position[0])
-                py1 = float(cell1.position[1])
-                search_r = s1 + 32
-                nearby = grid.query(px1, py1, search_r)
-                for cell2 in nearby:
-                    id2 = id(cell2)
-                    if id2 <= id1 or cell2 not in alive_set:
-                        continue
-                    dx = px1 - float(cell2.position[0])
-                    dy = py1 - float(cell2.position[1])
-                    dist = math.hypot(dx, dy)
-                    min_dist = (s1 + cell2._cached_size) * 0.5
-                    if dist >= min_dist:
-                        continue
+                dx = px1 - float(cell2.position[0])
+                dy = py1 - float(cell2.position[1])
+                dist = math.hypot(dx, dy)
+                min_dist = (s1 + cell2._cached_size) * 0.5
+                if dist >= min_dist:
+                    continue
 
-                    t1 = cell1.type
-                    t2 = cell2.type
-                    if allow_merge and t1 == t2:
-                        self.merge_cells(cell1, cell2)
-                        alive_set.discard(cell1)
-                        alive_set.discard(cell2)
-                        break
-                    elif t1 == "Phagocyte" and cell1.can_consume(cell2):
-                        cell1.consume(cell2, self)
-                        self._add_score_event(float(cell2.position[0]), float(cell2.position[1]),
-                                              float(cell2._body_size), False)
-                        alive_set.discard(cell2)
-                        self.remove_cell(cell2)
-                    elif t2 == "Phagocyte" and cell2.can_consume(cell1):
-                        cell2.consume(cell1, self)
-                        self._add_score_event(float(cell1.position[0]), float(cell1.position[1]),
-                                              float(cell1._body_size), False)
-                        alive_set.discard(cell1)
-                        self.remove_cell(cell1)
-                        break
-                    else:
-                        overlap = min_dist - dist
-                        inv_d = 1.0 / max(dist, 0.001)
-                        nx = dx * inv_d
-                        ny = dy * inv_d
-                        half = overlap * 0.5
-                        cell1.position[0] -= nx * half
-                        cell1.position[1] -= ny * half
-                        cell2.position[0] += nx * half
-                        cell2.position[1] += ny * half
+                overlap = min_dist - dist
+                overlap_frac = overlap / max(min_dist, 0.001)
+
+                t1 = cell1.type
+                t2 = cell2.type
+
+                # ── Adhesin merge ─────────────────────────────────
+                # Two cells of the same type that both have adhesin
+                # and are deeply overlapping will merge into one.
+                # Also merge when the global allow_merge flag is set.
+                can_adhesin_merge = (
+                    t1 == t2
+                    and cell1.adhesin and cell2.adhesin
+                    and overlap_frac >= self.merge_overlap_fraction
+                )
+                if allow_merge and t1 == t2:
+                    can_adhesin_merge = True
+
+                if can_adhesin_merge:
+                    self._add_score_event(
+                        (px1 + float(cell2.position[0])) * 0.5,
+                        (py1 + float(cell2.position[1])) * 0.5,
+                        max(float(cell1._body_size), float(cell2._body_size)),
+                        True)
+                    self.merge_cells(cell1, cell2)
+                    alive_set.discard(cell1)
+                    alive_set.discard(cell2)
+                    break
+
+                # ── Phagocyte consumption ─────────────────────────
+                elif t1 == "Phagocyte" and cell1.can_consume(cell2):
+                    cell1.consume(cell2, self)
+                    self._add_score_event(float(cell2.position[0]), float(cell2.position[1]),
+                                          float(cell2._body_size), False)
+                    alive_set.discard(cell2)
+                    self.remove_cell(cell2)
+                elif t2 == "Phagocyte" and cell2.can_consume(cell1):
+                    cell2.consume(cell1, self)
+                    self._add_score_event(float(cell1.position[0]), float(cell1.position[1]),
+                                          float(cell1._body_size), False)
+                    alive_set.discard(cell1)
+                    self.remove_cell(cell1)
+                    break
+
+                # ── Repulsion ─────────────────────────────────────
+                # Push apart with 20% overshoot so they don't
+                # immediately re-overlap on the next tick.
+                else:
+                    inv_d = 1.0 / max(dist, 0.001)
+                    nx = dx * inv_d    # points FROM cell2 TOWARD cell1
+                    ny = dy * inv_d
+                    # 1.2x overshoot prevents jitter from movement
+                    # pulling them back together next frame.
+                    half = overlap * 0.5 * 1.2
+                    # Push cell1 away (along +n) and cell2 away (along -n)
+                    cell1.position[0] += nx * half
+                    cell1.position[1] += ny * half
+                    cell2.position[0] -= nx * half
+                    cell2.position[1] -= ny * half
 
         if generate_food:
             food_to_generate = self.food_generation_rate * dt
@@ -304,13 +337,18 @@ class Environment:
     def merge_cells(self, cell1, cell2):
         new_genome = Genome()
         for gene in new_genome.genes:
-            if isinstance(new_genome.genes[gene], bool):
-                new_genome.genes[gene] = (cell1.genome.genes[gene] or cell2.genome.genes[gene])
-            elif isinstance(new_genome.genes[gene], tuple):
+            v1 = cell1.genome.genes[gene]
+            v2 = cell2.genome.genes[gene]
+            if isinstance(v1, bool):
+                new_genome.genes[gene] = (v1 or v2)
+            elif isinstance(v1, tuple):
                 new_genome.genes[gene] = tuple(
-                    (a + b) / 2 for a, b in zip(cell1.genome.genes[gene], cell2.genome.genes[gene]))
+                    (a + b) / 2 for a, b in zip(v1, v2))
+            elif isinstance(v1, int):
+                # Keep int genes as int — pick randomly from the parents
+                new_genome.genes[gene] = random.choice([v1, v2])
             else:
-                new_genome.genes[gene] = (cell1.genome.genes[gene] + cell2.genome.genes[gene]) / 2
+                new_genome.genes[gene] = (v1 + v2) / 2
         new_genome.genes['size'] = cell1.genome.genes['size'] + cell2.genome.genes['size']
         new_pos = ((cell1.position[0] + cell2.position[0]) / 2,
                    (cell1.position[1] + cell2.position[1]) / 2)

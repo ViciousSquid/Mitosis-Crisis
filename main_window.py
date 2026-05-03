@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QCheckBox, QSlider,
                              QGroupBox, QComboBox, QScrollArea, QDoubleSpinBox,
                              QFileDialog, QSizePolicy)
-from PyQt5.QtCore import Qt, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor, QPainter
 import random
 import math
@@ -255,6 +255,50 @@ class MainWindow(QMainWindow):
         self.random_button.clicked.connect(self.populate_random)
         sim_ctrl.addWidget(self.random_button)
 
+        # ── Time controls ─────────────────────────────────────────────
+        time_ctrl = QHBoxLayout()
+        sim_layout.addLayout(time_ctrl)
+
+        time_label = QLabel("Speed:")
+        time_label_font = QFont()
+        time_label_font.setBold(True)
+        time_label.setFont(time_label_font)
+        time_ctrl.addWidget(time_label)
+
+        self._speed_buttons = []
+        speed_presets = [
+            ("⏪ 0.25×", 0.25),
+            ("½×",       0.5),
+            ("1×",       1.0),
+            ("2×",       2.0),
+            ("⏩ 4×",    4.0),
+        ]
+        for label, speed in speed_presets:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setStyleSheet(
+                "QPushButton { padding: 3px 8px; border-radius: 3px; }"
+                "QPushButton:checked { background-color: #3a7bd5; color: white; font-weight: bold; }"
+            )
+            btn.clicked.connect(lambda checked, s=speed, b=btn: self._set_speed(s, b))
+            time_ctrl.addWidget(btn)
+            self._speed_buttons.append((btn, speed))
+
+        # Start with 1× checked
+        for btn, speed in self._speed_buttons:
+            btn.setChecked(speed == 1.0)
+
+        self.speed_label = QLabel("1.00×")
+        self.speed_label.setFixedWidth(42)
+        time_ctrl.addWidget(self.speed_label)
+
+        time_ctrl.addStretch()
+
+        self.step_button = QPushButton("⏭ Step")
+        self.step_button.setToolTip("Advance one simulation tick while paused")
+        self.step_button.clicked.connect(self._single_step)
+        time_ctrl.addWidget(self.step_button)
+
         right_layout = QVBoxLayout()
         content_layout.addLayout(right_layout, 1)
 
@@ -345,12 +389,34 @@ class MainWindow(QMainWindow):
         self.dna_dock = DNADock()
         self.root_layout.addWidget(self.dna_dock)
 
-        # Replaced QTimer with decoupled thread engine
+        # ── Simulation engine (runs on a background QThread) ──────────────
         self.simulation = SimulationEngine(self.environment)
-        self.simulation.frame_ready.connect(self.update_simulation_ui)
+        # Connect the sim's frame_ready to our handler — the handler is
+        # invoked on the *main/GUI* thread thanks to Qt's queued connection.
+        self.simulation.frame_ready.connect(self.update_simulation_ui,
+                                            Qt.QueuedConnection)
+
+        # ── Render timer — caps repaints at ~30 FPS ──────────────────────
+        # When the sim is running the sim thread drives repaints via
+        # frame_ready.  This timer provides a fallback repaint so the UI
+        # stays responsive even when no sim signal arrives (e.g. sim paused
+        # but user is panning / zooming).
+        self._render_dirty = False
+        self._render_timer = QTimer(self)
+        self._render_timer.setInterval(33)   # ~30 FPS
+        self._render_timer.timeout.connect(self._on_render_timer)
+        self._render_timer.start()
 
         self.gene_rows = {}
         self._setup_gene_editor()
+
+    # ------------------------------------------------------------------
+    # Render timer callback — only repaints when something flagged dirty
+    # ------------------------------------------------------------------
+    def _on_render_timer(self):
+        if self._render_dirty:
+            self._render_dirty = False
+            self.renderer.update()
 
     def _randomise_light_source(self):
         with self.environment.lock:
@@ -378,26 +444,26 @@ class MainWindow(QMainWindow):
         self.move_light_checkbox.setEnabled(enabled)
         if not enabled:
             self.move_light_checkbox.setChecked(False)
-        self.renderer.update()
+        self._render_dirty = True
 
     def centre_light(self):
         with self.environment.lock:
             cx, cy = self.environment.center
             self.environment.light_source = (cx, cy)
-        self.renderer.update()
+        self._render_dirty = True
 
     def on_light_colour_changed(self, index):
         _, rgb = self.light_presets[index]
         with self.environment.lock:
             self.environment.light_color = rgb
-        self.renderer.update()
+        self._render_dirty = True
 
     def on_intensity_changed(self, value):
         intensity = value / 100.0
         with self.environment.lock:
             self.environment.light_intensity = intensity
         self.intensity_label.setText(f"{intensity:.2f}×")
-        self.renderer.update()
+        self._render_dirty = True
 
     def _setup_gene_editor(self):
         for gene_def in GENE_FIELDS:
@@ -445,12 +511,12 @@ class MainWindow(QMainWindow):
 
         dna = cell.genome.encode_genes()
         self.dna_dock.set_dna(dna)
-        self.renderer.update_scene()
+        self._render_dirty = True
 
     def _apply_gene_changes(self):
         if self.selected_cell:
             self.selected_cell.genome.encode_genes()
-            self.renderer.update_scene()
+            self._render_dirty = True
 
     def _save_cell_genome(self):
         if not getattr(self, 'selected_cell', None):
@@ -472,7 +538,7 @@ class MainWindow(QMainWindow):
                 self._populate_gene_rows(self.selected_cell)
                 dna = self.selected_cell.genome.encode_genes()
                 self.dna_dock.set_dna(dna)
-                self.renderer.update_scene()
+                self._render_dirty = True
             except Exception as e:
                 print(f"Error loading genome: {e}")
 
@@ -487,9 +553,25 @@ class MainWindow(QMainWindow):
             self.start_button.setText("⏹ Stop")
             self.start_button.setStyleSheet("background-color: #8b1a1a; color: white; font-weight: bold; padding: 4px 12px; border-radius: 4px;")
 
-    def update_simulation_ui(self):
+    def _set_speed(self, speed, active_btn):
+        self.simulation.simulation_speed = speed
+        self.speed_label.setText(f"{speed:.2f}×")
+        for btn, _ in self._speed_buttons:
+            btn.setChecked(btn is active_btn)
+
+    def _single_step(self):
+        """Advance one simulation tick (works whether paused or running)."""
         with self.environment.lock:
-            self.renderer.update_scene()
+            self.environment.update(
+                self.simulation.time_step,
+                self.generate_food_checkbox.isChecked(),
+                self.simulation.allow_merge)
+        self._render_dirty = True
+        self.cell_count_label.setText(f"Cells: {len(self.environment.cells)}")
+
+    def update_simulation_ui(self):
+        """Called on the GUI thread when the sim thread emits frame_ready."""
+        with self.environment.lock:
             self.cell_count_label.setText(f"Cells: {len(self.environment.cells)}")
 
             if hasattr(self, 'selected_cell') and self.selected_cell is not None:
@@ -498,6 +580,14 @@ class MainWindow(QMainWindow):
                 else:
                     self.selected_cell = None
                     self.on_cell_selected(None)
+
+        # Mark dirty so the render timer picks it up on next tick.
+        # We don't call renderer.update() directly here — that way
+        # multiple fast sim ticks only produce one repaint.
+        self._render_dirty = True
+
+        # Tell the sim thread it can signal us again
+        self.simulation.mark_gui_idle()
 
     def _random_position(self):
         angle = random.uniform(0, 2 * math.pi)
@@ -517,7 +607,7 @@ class MainWindow(QMainWindow):
             else:
                 cell = Cell(Genome(), (x, y))
             self.environment.add_cell(cell)
-        self.renderer.update_scene()
+        self._render_dirty = True
 
     def delete_selected_cell(self):
         if hasattr(self, "selected_cell") and self.selected_cell:
@@ -540,7 +630,7 @@ class MainWindow(QMainWindow):
             for _ in range(30):
                 x, y = self._random_position()
                 self.environment.food.append((x, y))
-        self.renderer.update_scene()
+        self._render_dirty = True
 
     def _toggle_move_light(self, checked):
         self.renderer.move_light_mode = checked and self.environment.light_enabled
@@ -569,3 +659,10 @@ class MainWindow(QMainWindow):
         self.apply_btn.setVisible(True)
         self.save_btn.setVisible(True)
         self.load_btn.setVisible(True)
+
+    def closeEvent(self, event):
+        """Ensure the simulation thread is stopped before the window closes."""
+        if self.simulation.isRunning():
+            self.simulation.stop()
+        self._render_timer.stop()
+        super().closeEvent(event)

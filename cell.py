@@ -542,10 +542,15 @@ class Phagocyte(Cell):
         candidates = grid.query(px, py, self.HUNT_RANGE) if grid else environment.cells
         best, best_dist = None, float('inf')
         for cell in candidates:
-            if cell is self or cell.type == "Phagocyte":
+            if cell is self:
                 continue
-            if cell._body_size >= self._body_size * 0.75:
-                continue
+            # Skip other phagocytes unless we're significantly larger
+            if cell.type == "Phagocyte":
+                if self._body_size <= cell._body_size * 1.3:
+                    continue
+            else:
+                if cell._body_size >= self._body_size * 0.75:
+                    continue
             dist = math.hypot(px - float(cell.position[0]),
                               py - float(cell.position[1]))
             if dist < best_dist:
@@ -555,7 +560,8 @@ class Phagocyte(Cell):
 
     def can_consume(self, other):
         if other.type == "Phagocyte":
-            return False
+            # Can eat another phagocyte only if significantly larger
+            return self._body_size > other._body_size * 1.5
         return self._body_size > other._body_size * 1.3
 
 

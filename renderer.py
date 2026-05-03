@@ -391,17 +391,10 @@ class Renderer(QOpenGLWidget):
             painter.drawEllipse(QRectF(px - half, py - half, draw_size, draw_size))
 
         if cell.type != "Bacteria":
-            ns = draw_size * 0.28
-            nuc_col = QColor(base_color).darker(200)
-            nuc_col.setAlpha(170)
-            nx = px + math.sin(t * 0.7 + pulse_phase) * draw_size * 0.08
-            ny = py + math.cos(t * 0.5 + pulse_phase) * draw_size * 0.08
-            painter.setBrush(nuc_col)
+            ns = draw_size * 0.25
+            painter.setBrush(QColor(0, 0, 0, 160))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(QRectF(nx - ns / 2, ny - ns / 2, ns, ns))
-            nn = ns * 0.4
-            painter.setBrush(QColor(base_color).lighter(140))
-            painter.drawEllipse(QRectF(nx - nn / 2, ny - nn / 2, nn, nn))
+            painter.drawEllipse(QRectF(px - ns / 2, py - ns / 2, ns, ns))
 
         shimmer_alpha = int(60 + 40 * math.sin(t * 4 + pulse_phase))
         painter.setBrush(QColor(255, 255, 255, shimmer_alpha))
